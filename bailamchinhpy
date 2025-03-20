@@ -1,0 +1,167 @@
+import random
+import numpy as np
+import tkinter as tk
+from tkinter import messagebox
+
+# Thông số thuật toán di truyền
+TABLE_SIZE = 5
+POPULATION_SIZE = 100
+GENERATIONS = 200
+MUTATION_RATE = 0.1
+
+# Điểm thân thiết mặc định
+default_closeness_scores = {
+    "Vợ/chồng/người yêu": 2000,
+    "Anh/chị/em ruột": 900,
+    "Cha/mẹ – con cái": 700,
+    "Anh chị em họ": 500,
+    "Dì/chú/bác – cháu": 300,
+    "Bạn bè": 100,
+    "Không quen biết": 0
+}
+
+guests = []
+closeness_scores = {}
+must_sit_together = []
+cannot_sit_together = []
+num_tables = 1
+
+def get_input():
+    global guests, closeness_scores, must_sit_together, cannot_sit_together, num_tables
+    guests = [g.strip() for g in guest_entry.get("1.0", "end").strip().split("\n") if g.strip()]
+    if not guests:
+        messagebox.showerror("Lỗi", "Vui lòng nhập danh sách khách mời!")
+        return False
+    
+    num_tables = max(1, int(table_entry.get()))
+    must_sit_together.clear()
+    cannot_sit_together.clear()
+    closeness_scores.clear()
+    
+    for pair in must_together_entry.get("1.0", "end").strip().split("\n"):
+        parts = [p.strip() for p in pair.split("-")]
+        if len(parts) == 2:
+            must_sit_together.append(tuple(parts))
+    
+    for pair in cannot_together_entry.get("1.0", "end").strip().split("\n"):
+        parts = [p.strip() for p in pair.split("-")]
+        if len(parts) == 2:
+            if tuple(parts) in must_sit_together:
+                messagebox.showerror("Lỗi", f"Cặp {pair} vừa được chọn ngồi cùng nhau và không ngồi cùng nhau! Vui lòng kiểm tra lại.")
+                return False
+            cannot_sit_together.append(tuple(parts))
+    
+    relations = relation_entry.get("1.0", "end").strip().split("\n")
+    for rel in relations:
+        parts = [p.strip() for p in rel.split("-")]
+        if len(parts) == 3:
+            guest1, guest2, score = parts[0], parts[1], int(parts[2])
+            closeness_scores[(guest1, guest2)] = score
+            closeness_scores[(guest2, guest1)] = score
+    
+    for guest1 in guests:
+        for guest2 in guests:
+            if guest1 != guest2 and (guest1, guest2) not in closeness_scores:
+                closeness_scores[(guest1, guest2)] = default_closeness_scores["Không quen biết"]
+    return True
+
+def generate_individual():
+    shuffled_guests = guests[:]
+    random.shuffle(shuffled_guests)
+    return [shuffled_guests[i:i+TABLE_SIZE] for i in range(0, len(shuffled_guests), TABLE_SIZE) if shuffled_guests[i:i+TABLE_SIZE]]
+
+def fitness(individual):
+    score = 0
+    seen_pairs = set()
+    for table in individual:
+        for i in range(len(table)):
+            for j in range(i+1, len(table)):
+                pair = tuple(sorted([table[i], table[j]]))
+                if pair not in seen_pairs:
+                    score += closeness_scores.get(pair, 0)
+                    if pair in must_sit_together:
+                        score += 500
+                    if pair in cannot_sit_together:
+                        score -= 1000
+                    seen_pairs.add(pair)
+    return score
+
+def select(population):
+    population.sort(key=fitness, reverse=True)
+    return population[:POPULATION_SIZE//2]
+
+def crossover(parent1, parent2):
+    child = []
+    seen = set()
+    for i in range(len(parent1)):
+        table = [guest for guest in (parent1[i] if random.random() > 0.5 else parent2[i]) if guest not in seen]
+        seen.update(table)
+        child.append(table)
+    return child
+
+def mutate(individual):
+    if random.random() < MUTATION_RATE and len(individual) > 1:
+        table1, table2 = random.sample(range(len(individual)), 2)
+        if individual[table1] and individual[table2]:
+            guest1, guest2 = random.choice(individual[table1]), random.choice(individual[table2])
+            individual[table1].remove(guest1)
+            individual[table2].remove(guest2)
+            individual[table1].append(guest2)
+            individual[table2].append(guest1)
+
+def genetic_algorithm():
+    if not guests:
+        return []
+    population = [generate_individual() for _ in range(POPULATION_SIZE)]
+    for _ in range(GENERATIONS):
+        selected = select(population)
+        new_population = selected[:]
+        while len(new_population) < POPULATION_SIZE:
+            parent1, parent2 = random.sample(selected, 2)
+            child = crossover(parent1, parent2)
+            mutate(child)
+            new_population.append(child)
+        population = new_population
+    return max(population, key=fitness)
+
+def run_algorithm():
+    if not get_input():
+        return
+    top_arrangement = genetic_algorithm()
+    if not top_arrangement:
+        messagebox.showerror("Lỗi", "Không thể tạo sắp xếp hợp lệ. Vui lòng kiểm tra lại dữ liệu nhập vào!")
+        return
+    max_score = fitness(top_arrangement)
+    result_text = "\n".join(["Bàn {}: {}".format(i+1, ", ".join(table)) for i, table in enumerate(top_arrangement)])
+    result_text += "\n\nĐiểm thân thiết cao nhất: " + str(max_score)
+    messagebox.showinfo("Kết quả", result_text)
+    messagebox.showinfo("Thông báo", "Bạn hãy nhập danh sách mới để thực hiện lần tiếp theo!")
+
+# Giao diện Tkinter
+root = tk.Tk()
+root.title("Tối ưu sắp xếp chỗ ngồi tiệc cưới")
+
+tk.Label(root, text="Danh sách khách mời (mỗi dòng một tên):").pack()
+guest_entry = tk.Text(root, height=8, width=60)
+guest_entry.pack()
+
+tk.Label(root, text="Số bàn:").pack()
+table_entry = tk.Entry(root)
+table_entry.pack()
+table_entry.insert(0, "")
+
+tk.Label(root, text="Phải ngồi cùng nhau (Nhập tên, cách nhau bởi dấu - trên mỗi dòng):").pack()
+must_together_entry = tk.Text(root, height=8, width=60)
+must_together_entry.pack()
+
+tk.Label(root, text="Không ngồi cùng nhau (Nhập tên, cách nhau bởi dấu - trên mỗi dòng):").pack()
+cannot_together_entry = tk.Text(root, height=8, width=60)
+cannot_together_entry.pack()
+
+tk.Label(root, text="Điểm thân thiết (Tên1 - Tên2 - Điểm, mỗi dòng một cặp):").pack()
+relation_entry = tk.Text(root, height=8, width=60)
+relation_entry.pack()
+
+tk.Button(root, text="Tối ưu sắp xếp", command=run_algorithm).pack()
+
+root.mainloop()
